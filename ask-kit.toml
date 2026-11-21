@@ -1,0 +1,24 @@
+id = "temet.systemd"
+name = "systemd"
+version = "0.1.0"
+min_ask_kit = "0.2.0"
+platforms = ["linux"]
+says = "Linux services and machines: is a systemd unit (user or system) running or failing and why, what its journal says since a time, why it restarted, which timers ran or failed, what listens on a port, what crashed (coredumps), what uses the disk, which process eats CPU or memory, on this machine and on other machines over ssh; and acting on them (restart, stop, start, enable a unit, kill a process, clean up files)"
+keywords = ["systemd", "systemctl", "journalctl", "journald", "units?", "services?", "timers?", "daemons?", "listening", "ports?", "coredumps?", "crash(ed|es)?", "restart(ed|s)?", "disk", "df", "du", "cpu", "memory", "processes?", "ss", "lsof", "launchctl"]
+route_hint = "the state of a service, port, timer, process or disk on a machine (and restarting or killing things) is systemd; what the code of a service does is code; what a past session did about a service is sessions"
+cite = "`machine: command` and the output line that shows it"
+instructions = "instructions.md"
+scripts = "scripts"
+bench = "bench/questions.json"
+acts = ["systemctl start", "systemctl stop", "systemctl restart", "systemctl reload", "systemctl enable", "systemctl disable", "systemctl daemon-reload", "systemctl reset-failed", "systemd-run", "kill", "pkill", "rm", "journalctl --vacuum", "any other command the question asks for"]
+
+[[settings]]
+key = "HOSTS"
+about = "other machines to reach over ssh, as comma-separated aliases from ~/.ssh/config (e.g. pi,server); this machine is always included"
+default = ""
+
+[[sources]]
+kind = "module"
+name = "host"
+module = "host.mjs"
+api = "api.d.ts"

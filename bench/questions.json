@@ -1,0 +1,36 @@
+{
+  "_about": "Kinds of question agents answer by hand with systemctl, journalctl, ss or ps: the state of a unit, which timers exist, what a unit's journal says. These are written against units every systemd Linux machine has (systemd-journald, systemd-logind, systemd-tmpfiles-clean.timer), so they run anywhere; the answers are checked against a live machine, not fixed forever. The kit has not been run against a model on them.",
+  "questions": [
+    {
+      "id": "journald-state",
+      "q": "Is the systemd-journald service running on this machine? Since when, and which scope (user or system) is it in?",
+      "expect": ["systemd-journald", "(active|running)", "system"]
+    },
+    {
+      "id": "logind-enabled",
+      "q": "What state is the systemd-logind service in on this machine, and is it enabled?",
+      "expect": ["systemd-logind", "(active|running)", "(static|enabled)"]
+    },
+    {
+      "id": "tmpfiles-timer",
+      "q": "Is there a systemd timer on this machine that cleans temporary files? What is its name and when did it last run?",
+      "expect": ["systemd-tmpfiles-clean"]
+    },
+    {
+      "id": "failed-units",
+      "q": "Which systemd units, user or system, are in the failed state on this machine right now?",
+      "expect": ["failed"]
+    },
+    {
+      "id": "journald-shot",
+      "do": "service",
+      "params": { "match": "systemd-journald" },
+      "expect": ["systemd-journald", "(active|running)"]
+    },
+    {
+      "id": "timers-shot",
+      "do": "failing",
+      "expect": ["timers", "failedUnits"]
+    }
+  ]
+}
