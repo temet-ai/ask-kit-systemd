@@ -19,10 +19,15 @@ export default async function ({ host }, { by = "cpu", n = 12, machine }) {
   if (!mac) {
     // Instant CPU needs the second sample of top; ps %CPU is an average over the process's life.
     const sort = memBy ? "-rss" : "-pcpu";
-    const ps = await host.run(name, "ps", "-eo", "pid=,user=,pcpu=,pmem=,rss=,etime=,args=", `--sort=${sort}`);
+    // The process list and the samples do not depend on each other: run them together.
+    const [ps, t, fr, la] = await Promise.all([
+      host.run(name, "ps", "-eo", "pid=,user=,pcpu=,pmem=,rss=,etime=,args=", `--sort=${sort}`),
+      memBy ? null : host.runFor(name, 30, "top", "-b", "-n", "2", "-d", "1", "-w", "200"),
+      memBy ? host.run(name, "free", "-m") : null,
+      memBy ? host.run(name, "cat", "/proc/loadavg") : null,
+    ]);
     let rows = lines(ps.out).map((l) => l.trim().match(/^(\d+)\s+(\S+)\s+([\d.]+)\s+([\d.]+)\s+(\d+)\s+(\S+)\s+(.*)$/)).filter(Boolean);
     if (!memBy) {
-      const t = await host.runFor(name, 30, "top", "-b", "-n", "2", "-d", "1", "-w", "200");
       const frames = t.out.split(/^top - /m).filter(Boolean);
       const last = frames[frames.length - 1] ?? "";
       load = last.match(/load average: ([\d., ]+)/)?.[1]?.trim();
@@ -41,14 +46,13 @@ export default async function ({ host }, { by = "cpu", n = 12, machine }) {
       const byPid = new Map(rows.map((r) => [r[1], r]));
       rows = Object.entries(cpu)
         .sort((x, y) => y[1] - x[1])
-        .slice(0, n)
         .map(([pid, pct]) => (byPid.has(pid) ? [...byPid.get(pid).slice(0, 3), String(pct), ...byPid.get(pid).slice(4)] : null))
-        .filter(Boolean);
+        .filter(Boolean)
+        .slice(0, n);
     } else {
-      const fr = await host.run(name, "free", "-m");
       memory = lines(fr.out).find((l) => l.startsWith("Mem:"))?.trim().replace(/\s+/g, " ");
       swap = lines(fr.out).find((l) => l.startsWith("Swap:"))?.trim().replace(/\s+/g, " ");
-      load = (await host.run(name, "cat", "/proc/loadavg")).out.trim();
+      load = la.out.trim();
       rows = rows.slice(0, n);
     }
     const pi = await pidInfo(host, name, rows.map((r) => r[1]));

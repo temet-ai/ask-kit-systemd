@@ -26,37 +26,55 @@ export default async function ({ host }, { machine, since = "today", scope }) {
 
   const failedUnits = [];
   const timers = [];
-  for (const sc of await host.scopes(name, scope)) {
-    const f = await host.run(name, "systemctl", sc, "list-units", "--failed", "--all", "--no-legend", "--plain");
-    const names = lines(f.out).map((l) => l.trim().split(/\s+/)[0]).filter((u) => u?.includes("."));
-    if (names.length) {
-      const s = await host.run(name, "systemctl", sc, "show", ...names, "-p", "Id,SubState,Result,ExecMainStatus,InactiveEnterTimestamp");
-      for (const p of parseShow(s.out)) failedUnits.push({ scope: sc.slice(2), unit: p.Id, sub: p.SubState, result: p.Result, exitStatus: p.ExecMainStatus, since: p.InactiveEnterTimestamp });
-    }
-    const t = await host.run(name, "systemctl", sc, "list-units", "--type=timer", "--all", "--no-legend", "--plain");
-    const tnames = lines(t.out).map((l) => l.trim().split(/\s+/)[0]).filter((u) => u?.endsWith(".timer"));
-    if (tnames.length) {
-      const s = await host.run(name, "systemctl", sc, "show", ...tnames, "-p", "Id,ActiveState,Triggers,LastTriggerUSec,NextElapseUSecRealtime");
-      const rows = parseShow(s.out);
-      const targets = [...new Set(rows.map((r) => r.Triggers).filter(Boolean))];
-      const res = targets.length ? parseShow((await host.run(name, "systemctl", sc, "show", ...targets, "-p", "Id,Result,ExecMainStatus,ActiveState")).out) : [];
-      for (const r of rows) {
-        const tr = res.find((x) => x.Id === r.Triggers);
-        timers.push({
-          scope: sc.slice(2),
-          timer: r.Id,
-          state: r.ActiveState,
-          triggers: r.Triggers,
-          lastRun: r.LastTriggerUSec || "never",
-          nextRun: r.NextElapseUSecRealtime || undefined,
-          lastResult: tr ? `${tr.Result} (exit ${tr.ExecMainStatus}, ${tr.ActiveState})` : undefined,
-          failed: !!tr && (tr.Result !== "success" || tr.ActiveState === "failed"),
-        });
+  const perScope = async (sc) => {
+    const fu = [];
+    const tm = [];
+    const failedP = (async () => {
+      const f = await host.run(name, "systemctl", sc, "list-units", "--failed", "--all", "--no-legend", "--plain");
+      const names = lines(f.out).map((l) => l.trim().split(/\s+/)[0]).filter((u) => u?.includes("."));
+      if (names.length) {
+        const s = await host.run(name, "systemctl", sc, "show", ...names, "-p", "Id,SubState,Result,ExecMainStatus,InactiveEnterTimestamp");
+        for (const p of parseShow(s.out)) fu.push({ scope: sc.slice(2), unit: p.Id, sub: p.SubState, result: p.Result, exitStatus: p.ExecMainStatus, since: p.InactiveEnterTimestamp });
       }
-    }
+    })();
+    const timersP = (async () => {
+      const t = await host.run(name, "systemctl", sc, "list-units", "--type=timer", "--all", "--no-legend", "--plain");
+      const tnames = lines(t.out).map((l) => l.trim().split(/\s+/)[0]).filter((u) => u?.endsWith(".timer"));
+      if (tnames.length) {
+        const s = await host.run(name, "systemctl", sc, "show", ...tnames, "-p", "Id,ActiveState,Triggers,LastTriggerUSec,NextElapseUSecRealtime");
+        const rows = parseShow(s.out);
+        const targets = [...new Set(rows.map((r) => r.Triggers).filter(Boolean))];
+        const res = targets.length ? parseShow((await host.run(name, "systemctl", sc, "show", ...targets, "-p", "Id,Result,ExecMainStatus,ActiveState")).out) : [];
+        for (const r of rows) {
+          const tr = res.find((x) => x.Id === r.Triggers);
+          tm.push({
+            scope: sc.slice(2),
+            timer: r.Id,
+            state: r.ActiveState,
+            triggers: r.Triggers,
+            lastRun: r.LastTriggerUSec || "never",
+            nextRun: r.NextElapseUSecRealtime || undefined,
+            lastResult: tr ? `${tr.Result} (exit ${tr.ExecMainStatus}, ${tr.ActiveState})` : undefined,
+            failed: !!tr && (tr.Result !== "success" || tr.ActiveState === "failed"),
+          });
+        }
+      }
+    })();
+    await Promise.all([failedP, timersP]);
+    return { fu, tm };
+  };
+
+  // Units, core dumps and OOM kills do not depend on each other.
+  const [scopeRows, cd, k] = await Promise.all([
+    host.scopes(name, scope).then((scs) => Promise.all(scs.map(perScope))),
+    host.run(name, "coredumpctl", "list", `--since=${since}`, "--no-legend"),
+    host.run(name, "journalctl", "-k", `--since=${since}`, "-g", "Out of memory|oom-kill|Killed process", "-n", "10", "-o", "short-iso"),
+  ]);
+  for (const { fu, tm } of scopeRows) {
+    failedUnits.push(...fu);
+    timers.push(...tm);
   }
 
-  const cd = await host.run(name, "coredumpctl", "list", `--since=${since}`, "--no-legend");
   const dumps = lines(cd.out).filter((l) => /^\w{3} \d{4}-/.test(l));
   const byProgram = {};
   for (const l of dumps) {
@@ -66,7 +84,6 @@ export default async function ({ host }, { machine, since = "today", scope }) {
   const coredumps = { count: dumps.length, byProgram, latest: dumps.slice(-5).map((l) => clipLine(l.trim().replace(/\s+/g, " "), 160)) };
   if (cd.code === 127) coredumps.note = "coredumpctl is not installed";
 
-  const k = await host.run(name, "journalctl", "-k", `--since=${since}`, "-g", "Out of memory|oom-kill|Killed process", "-n", "10", "-o", "short-iso");
   const oom = lines(k.out).filter((l) => !l.startsWith("-- ")).map((l) => clipLine(l, 200));
 
   const failedTimers = timers.filter((t) => t.failed);

@@ -16,6 +16,8 @@ export default async function ({ host }, { path = "~", depth = 1, top = 15, mach
   const info = await host.info(name);
   if (!info.reachable) return { machine: name, reachable: false, error: info.error };
   const mac = info.os === "darwin";
+  // df is instant and du can take a while: start both now.
+  const duP = mac ? host.runFor(name, timeout, "du", "-x", "-k", "-d", String(depth), path) : host.runFor(name, timeout, "du", "-x", "-B1", `--max-depth=${depth}`, path);
   const df = await host.run(name, "df", mac ? "-kP" : "-kP", ...(mac ? [] : []));
   const filesystems = [];
   for (const l of lines(df.out).slice(1)) {
@@ -32,7 +34,7 @@ export default async function ({ host }, { path = "~", depth = 1, top = 15, mach
       filesystems.splice(filesystems.indexOf(f), 1);
     } else seen.set(k, f);
   }
-  const du = mac ? await host.runFor(name, timeout, "du", "-x", "-k", "-d", String(depth), path) : await host.runFor(name, timeout, "du", "-x", "-B1", `--max-depth=${depth}`, path);
+  const du = await duP;
   const mult = mac ? 1024 : 1;
   const biggest = lines(du.out)
     .map((l) => l.match(/^(\d+)\s+(.*)$/))

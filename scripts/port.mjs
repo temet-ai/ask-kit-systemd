@@ -21,8 +21,10 @@ export default async function ({ host }, { port, process: proc, machine, udp = t
       if (m) rows.push({ proto: "tcp", address: m[1], port: Number(m[2]), process: c[0], pid: Number(c[1]), user: c[2] });
     }
   } else {
-    for (const [proto, flag] of [["tcp", "-ltnpH"], ...(udp ? [["udp", "-lunpH"]] : [])]) {
-      const r = await host.run(name, "ss", flag);
+    const protos = [["tcp", "-ltnpH"], ...(udp ? [["udp", "-lunpH"]] : [])];
+    const results = await Promise.all(protos.map(([, flag]) => host.run(name, "ss", flag)));
+    for (const [i, [proto]] of protos.entries()) {
+      const r = results[i];
       for (const l of lines(r.out)) {
         const c = l.trim().split(/\s+/);
         const local = c.find((x, i) => i >= 3 && /:(\d+|\*)$/.test(x));

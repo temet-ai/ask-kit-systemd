@@ -24,7 +24,7 @@ How to work:
 - Times: the journal and `systemctl` print machine-local time with a zone; compare times only with
   the zone. A window given as "today" or "-3h" is journalctl's own syntax.
 - A Mac (`info.os` is "darwin") has launchctl, not systemd; the scripts say so. A machine that does
-  not answer over ssh is an answer: report the error.
+  not answer over ssh is an answer: report the error. When a machine or daemon does not answer (a host that is off, a refused connection), try one other call and stop; never wait or retry in a loop.
 - Acting: `host.run(machine, "systemctl", "--user", "restart", unit)`, then `service` again to show
   the new state and since-time. Kill by pid with `host.run(machine, "kill", pid)`. Say what you ran.
   Do only what was asked, on the machine and scope asked.

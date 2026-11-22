@@ -35,9 +35,19 @@ export default async function ({ host }, { match, machine, scope, since = "-3h",
   }
 
   const found = [];
-  for (const sc of await host.scopes(name, scope)) {
-    const loaded = await host.run(name, "systemctl", sc, "list-units", "--all", "--no-legend", "--plain", `*${match}*`);
-    const files = await host.run(name, "systemctl", sc, "list-unit-files", "--no-legend", "--plain", `*${match}*`);
+  // Process listing does not depend on the units: start it now.
+  const psP = host.run(name, "ps", "-eo", "pid,etime,pcpu,pmem,args");
+  const scopes = await host.scopes(name, scope);
+  const listed = await Promise.all(
+    scopes.map(async (sc) => {
+      const [loaded, files] = await Promise.all([
+        host.run(name, "systemctl", sc, "list-units", "--all", "--no-legend", "--plain", `*${match}*`),
+        host.run(name, "systemctl", sc, "list-unit-files", "--no-legend", "--plain", `*${match}*`),
+      ]);
+      return { sc, loaded, files };
+    }),
+  );
+  for (const { sc, loaded, files } of listed) {
     const seen = new Set();
     for (const l of lines(loaded.out)) {
       const [unit, , active, sub] = l.trim().split(/\s+/);
@@ -55,8 +65,7 @@ export default async function ({ host }, { match, machine, scope, since = "-3h",
   // Running or failed units first.
   const rank = (u) => (u.active === "failed" ? 0 : u.active === "active" ? 1 : u.active === "activating" ? 1 : 2);
   found.sort((a, b) => rank(a) - rank(b));
-  const units = [];
-  for (const u of found.slice(0, max)) {
+  const units = await Promise.all(found.slice(0, max).map(async (u) => {
     const sc = `--${u.scope}`;
     const [show, jr, bad] = await Promise.all([
       host.run(
@@ -92,11 +101,11 @@ export default async function ({ host }, { match, machine, scope, since = "-3h",
     row.errors = [...new Set([...lines(bad.out).filter((l) => !l.startsWith("-- ")), ...j.filter((l) => ERR_LINE.test(l))])].slice(0, 10).map((l) => clipLine(l));
     if (jr.fallback) row.journalSource = jr.fallback;
     if (!j.length) row.journalNote = (jr.err || jr.out || "no journal lines in this window").trim().slice(0, 200) || `no journal lines since ${since}`;
-    units.push(row);
-  }
+    return row;
+  }));
 
   // A thing with no unit may still run: processes whose command line matches.
-  const ps = await host.run(name, "ps", "-eo", "pid,etime,pcpu,pmem,args");
+  const ps = await psP;
   const processes = lines(ps.out)
     .filter((l) => l.toLowerCase().includes(needle) && !/ps -eo|ask-kit/.test(l))
     .slice(0, 10)
